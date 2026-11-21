@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { AmalMark, APP_NAME } from './brand';
+import { APP_NAME } from './brand';
 import { usePlanner } from './state';
 
 export function AuthScreen() {
@@ -27,7 +27,7 @@ export function AuthScreen() {
 
   return <main className="min-h-screen grid place-items-center px-5">
     <form onSubmit={submit} className="onboarding w-full max-w-md">
-      <span className="brand-icon mb-8"><AmalMark size={30} /></span>
+      <p className="brand mb-8">{APP_NAME}<span className="text-primary">.</span></p>
       <h1 className="page-title">{mode === 'up' ? 'Create your account' : `Welcome back`}<span className="text-primary">.</span></h1>
       <p className="text-muted-foreground text-sm mt-3 mb-8">{mode === 'up' ? `Your tasks, classes, notes and spending stay private to this email.` : `Sign in to open the record saved for your email.`}</p>
       {mode === 'up' && <label className="block text-sm mb-4">Your name<input autoFocus required maxLength={60} autoComplete="name" className="field mt-2" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Ayesha" /></label>}
@@ -46,7 +46,7 @@ export function AuthScreen() {
 export function SetupScreen() {
   return <main className="min-h-screen grid place-items-center px-5">
     <div className="onboarding w-full max-w-md">
-      <span className="brand-icon mb-8"><AmalMark size={30} /></span>
+      <p className="brand mb-8">{APP_NAME}<span className="text-primary">.</span></p>
       <h1 className="page-title">{APP_NAME} isn’t connected yet<span className="text-primary">.</span></h1>
       <ol className="text-sm text-muted-foreground mt-4 space-y-2 list-decimal pl-5">
         <li>In the Supabase project, open the SQL editor and run <span className="text-foreground">db/schema.sql</span>.</li>

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="public/icon-512.png" alt="A’mal logo" width="96" height="96" />
+  <img src="public/icon-512.png" alt="Wajib logo" width="96" height="96" />
 </p>
 
-<h1 align="center">A’mal</h1>
+<h1 align="center">Wajib</h1>
 
 <p align="center">
   A personal everyday planner for students — tasks, Namaz, class routine, notes and spending in one place, built for the phone first.
@@ -10,9 +10,9 @@
 
 ---
 
-## What is A’mal?
+## What is Wajib?
 
-**A’mal** (أعمال, “deeds”) is a daily-life web app that keeps everything a university student in Bangladesh juggles in one calm space:
+**Wajib** is a daily-life web app that keeps everything a university student in Bangladesh juggles in one calm space:
 what to do today, when the next prayer is, which class is next and in which room, what to remember, and whether this month’s spending is still on track.
 
 It greets you by name, works in a dark and a cream (light) theme, and is designed mainly for mobile screens with a bottom navigation bar. On a laptop it switches to a sidebar layout.
@@ -41,7 +41,7 @@ Everything you enter is saved on your own device — there is no account and not
 - A live countdown to the next prayer, a daily checklist to record prayers, and optional prayer reminders.
 
 ### Class routine
-- Upload your routine as **DOCX, DOC, XLSX, XLS, PNG or JPG**. A’mal reads the course, day, time, room, faculty and section, then shows everything in an editable review table before saving — nothing is guessed or invented.
+- Upload your routine as **DOCX, DOC, XLSX, XLS, PNG or JPG**. Wajib reads the course, day, time, room, faculty and section, then shows everything in an editable review table before saving — nothing is guessed or invented.
 - Understands university day codes: **S** Sunday, **M** Monday, **T** Tuesday, **W** Wednesday, **R** Thursday (e.g. `ST`, `MW`, `TR`, `SR`; labs use one letter).
 - Weekly timetable with a countdown to the next class, a live “in class” timer, and start/end buttons for when a class runs early or late.
 - Optional “Read with AI” for unusual layouts — the file is only sent when you tap it.

@@ -1,6 +1,6 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { Sun, Moon, LayoutGrid, ListTodo, NotebookPen, Wallet, GraduationCap, Settings, X, MapPin } from 'lucide-react';
-import { AmalMark, APP_NAME } from './brand';
+import { APP_NAME } from './brand';
 import { NamazIcon } from './namaz-icon';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
@@ -31,7 +31,7 @@ export function Shell({ children }: { children: ReactNode }) {
   return <div className={dark ? 'dark' : ''}><div className="planner">
     <ReminderEngine />
     <aside className="sidebar">
-      <Link to="/" className="brand mb-10"><span className="brand-icon"><AmalMark size={22} /></span><span className="brand-name">{APP_NAME}<span className="text-primary">.</span></span></Link>
+      <Link to="/" className="brand mb-10"><span className="brand-name">{APP_NAME}<span className="text-primary">.</span></span></Link>
       <div className="sidebar-extra text-[10px] uppercase text-muted-foreground mb-3 px-4">YOUR EVERYDAY SPACE</div>
       <nav>{nav.map(n => <Link key={n.to} to={n.to} className={`nav-link ${path === n.to ? 'active' : ''}`}><n.icon size={19} /><span className="nav-label">{n.label}</span></Link>)}</nav>
       <div className="sidebar-extra mt-auto">

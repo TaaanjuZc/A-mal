@@ -1,4 +1,4 @@
-// A’mal service worker: shows reminder notifications and is ready to receive Web Push
+// Wajib service worker: shows reminder notifications and is ready to receive Web Push
 // payloads ({ title, body, tag, url }) once a backend push scheduler is connected.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
@@ -7,7 +7,7 @@ self.addEventListener('push', event => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data && event.data.text() }; }
   event.waitUntil(
-    self.registration.showNotification(data.title || 'A’mal reminder', {
+    self.registration.showNotification(data.title || 'Wajib reminder', {
       body: data.body || '',
       tag: data.tag,
       data: { url: data.url || '/' },

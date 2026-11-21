@@ -29,7 +29,7 @@ export function SettingsView() {
   }
 
   return <>
-    <PageHeading title="Make yourself at home." subtitle="The little preferences that make A’mal yours." />
+    <PageHeading title="Make yourself at home." subtitle="The little preferences that make Wajib yours." />
     <div className="grid lg:grid-cols-2 gap-6 max-w-5xl items-start">
       <div className="panel p-6 space-y-7">
         <ProfileEditor />
@@ -53,11 +53,11 @@ export function SettingsView() {
           <label className="flex items-center justify-between gap-3 text-sm">Remind me before class<select className="field w-auto py-1.5" value={r.classMinutes} onChange={e => setR({ classMinutes: Number(e.target.value) })}>{[0, 5, 10, 15, 30].map(m => <option key={m} value={m}>{m ? `${m} min before` : 'At start time'}</option>)}</select></label>
           <Toggle label="Namaz reminders" description="Choose prayers and timing on the Namaz page" checked={r.prayers} onChange={v => setR({ prayers: v })} />
           <div className="border-t border-border pt-5">
-            <Toggle label="Browser notifications" description="Show system notifications while A’mal is open in a tab" checked={r.browser && permission === 'granted'} onChange={enableBrowser} disabled={permission === 'unsupported'} />
+            <Toggle label="Browser notifications" description="Show system notifications while Wajib is open in a tab" checked={r.browser && permission === 'granted'} onChange={enableBrowser} disabled={permission === 'unsupported'} />
             {permission === 'denied' && <p className="text-xs text-destructive mt-2">Notifications are blocked for this site. Allow them in your browser’s site settings — in-app reminders still work.</p>}
             {permission === 'unsupported' && <p className="text-xs text-muted-foreground mt-2">This browser doesn’t support notifications. In-app reminders still work.</p>}
-            {r.browser && permission === 'granted' && <Button variant="secondary" size="sm" className="mt-3" onClick={async () => { const reg = await navigator.serviceWorker?.getRegistration(); if (reg) await reg.showNotification('A’mal', { body: 'Notifications are working.', tag: 'daywell-test' }); else new Notification('A’mal', { body: 'Notifications are working.' }); }}><BellRing size={14} />Send a test</Button>}
-            <p className="text-[11px] text-muted-foreground mt-3">Reminders you miss while A’mal is closed appear in the bell when you come back.</p>
+            {r.browser && permission === 'granted' && <Button variant="secondary" size="sm" className="mt-3" onClick={async () => { const reg = await navigator.serviceWorker?.getRegistration(); if (reg) await reg.showNotification('Wajib', { body: 'Notifications are working.', tag: 'daywell-test' }); else new Notification('Wajib', { body: 'Notifications are working.' }); }}><BellRing size={14} />Send a test</Button>}
+            <p className="text-[11px] text-muted-foreground mt-3">Reminders you miss while Wajib is closed appear in the bell when you come back.</p>
           </div>
         </div>
       </div>
