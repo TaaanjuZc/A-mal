@@ -9,22 +9,12 @@ import { PageHeading } from './shell';
 import { notificationPermission, requestNotificationPermission, type PermissionState } from './notifications';
 
 export function SettingsView() {
-  const { dark, setDark, profile, setName, prefs, updatePrefs, signOut } = usePlanner();
-  const [name, setNameDraft] = useState(profile?.name ?? '');
-  const [savedName, setSavedName] = useState(false);
+  const { dark, setDark, prefs, updatePrefs } = usePlanner();
   const [newCat, setNewCat] = useState('');
   const [permission, setPermission] = useState<PermissionState>('default');
   useEffect(() => setPermission(notificationPermission()), []);
   const r = prefs.reminders;
   const setR = (patch: Partial<ReminderSettings>) => updatePrefs(p => ({ ...p, reminders: { ...p.reminders, ...patch } }));
-
-  function saveName(e: FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setName(name.trim().slice(0, 60));
-    setSavedName(true);
-    window.setTimeout(() => setSavedName(false), 2000);
-  }
   async function enableBrowser(on: boolean) {
     if (!on) { setR({ browser: false }); return; }
     const result = await requestNotificationPermission();
@@ -42,12 +32,7 @@ export function SettingsView() {
     <PageHeading title="Make yourself at home." subtitle="The little preferences that make A’mal yours." />
     <div className="grid lg:grid-cols-2 gap-6 max-w-5xl items-start">
       <div className="panel p-6 space-y-7">
-        <form onSubmit={saveName}>
-          <h2 className="section-title mb-3">Your name</h2>
-          <div className="flex gap-2"><input aria-label="Display name" required maxLength={60} className="field" value={name} onChange={e => setNameDraft(e.target.value)} /><Button type="submit" disabled={!name.trim() || name.trim() === profile?.name}>{savedName ? <><Check />Saved</> : 'Save'}</Button></div>
-          <p className="text-xs text-muted-foreground mt-2">Used in your greeting. Saved to the account for {profile?.email}.</p>
-          <Button type="button" variant="secondary" className="mt-4" onClick={() => void signOut()}><LogOut />Sign out</Button>
-        </form>
+        <ProfileEditor />
         <div><h2 className="section-title mb-3">Appearance</h2><div className="flex gap-3"><Button variant={dark ? 'default' : 'outline'} onClick={() => setDark(true)}><Moon />Dark</Button><Button variant={!dark ? 'default' : 'outline'} onClick={() => setDark(false)}><Sun />Cream</Button></div></div>
         <label className="block text-sm">Lifestyle profile<select className="field mt-2" value={prefs.lifestyle} onChange={e => updatePrefs(p => ({ ...p, lifestyle: e.target.value }))}>{['Student', 'Employee', 'Business owner', 'Homemaker'].map(p => <option key={p}>{p}</option>)}</select></label>
         <label className="block text-sm">Monthly budget (৳)<input type="number" min={0} inputMode="numeric" placeholder="Not set" className="field mt-2" value={prefs.budget.monthly || ''} onChange={e => updatePrefs(p => ({ ...p, budget: { ...p.budget, monthly: Math.max(0, Number(e.target.value) || 0) } }))} />
@@ -79,6 +64,87 @@ export function SettingsView() {
       <div className="panel p-6"><DashboardSettings /></div>
     </div>
   </>;
+}
+
+function ProfileEditor() {
+  const { profile, setName, signOut, updateEmail, updatePassword } = usePlanner();
+  const [name, setNameDraft] = useState(profile?.name ?? '');
+  const [savedName, setSavedName] = useState(false);
+  const [email, setEmail] = useState('');
+  const [emailPassword, setEmailPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [nextPassword, setNextPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [emailStatus, setEmailStatus] = useState<{ kind: 'error' | 'notice'; text: string } | null>(null);
+  const [passwordStatus, setPasswordStatus] = useState<{ kind: 'error' | 'notice'; text: string } | null>(null);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+
+  function saveName(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setName(name.trim().slice(0, 60));
+    setSavedName(true);
+    window.setTimeout(() => setSavedName(false), 2000);
+  }
+
+  async function saveEmail(e: FormEvent) {
+    e.preventDefault();
+    setEmailStatus(null);
+    setEmailBusy(true);
+    const result = await updateEmail(email, emailPassword);
+    setEmailBusy(false);
+    if (result.error) setEmailStatus({ kind: 'error', text: result.error });
+    else if (result.notice) {
+      setEmailStatus({ kind: 'notice', text: result.notice });
+      setEmail('');
+      setEmailPassword('');
+    }
+  }
+
+  async function savePassword(e: FormEvent) {
+    e.preventDefault();
+    setPasswordStatus(null);
+    if (nextPassword !== confirmPassword) {
+      setPasswordStatus({ kind: 'error', text: 'Type the new password the same way in both fields.' });
+      return;
+    }
+    setPasswordBusy(true);
+    const result = await updatePassword(currentPassword, nextPassword);
+    setPasswordBusy(false);
+    if (result.error) setPasswordStatus({ kind: 'error', text: result.error });
+    else if (result.notice) {
+      setPasswordStatus({ kind: 'notice', text: result.notice });
+      setCurrentPassword('');
+      setNextPassword('');
+      setConfirmPassword('');
+    }
+  }
+
+  return <div className="space-y-7">
+    <form onSubmit={saveName}>
+      <h2 className="section-title mb-3">Your name</h2>
+      <div className="flex gap-2"><input aria-label="Display name" required maxLength={60} autoComplete="name" className="field" value={name} onChange={e => setNameDraft(e.target.value)} /><Button type="submit" disabled={!name.trim() || name.trim() === profile?.name}>{savedName ? <><Check />Saved</> : 'Save'}</Button></div>
+      <p className="text-xs text-muted-foreground mt-2">Shown in your greeting and saved on this account.</p>
+    </form>
+    <form onSubmit={saveEmail} className="space-y-3 border-t border-border pt-7">
+      <h2 className="section-title">Email</h2>
+      <p className="text-xs text-muted-foreground">You sign in with {profile?.email}. Your records stay on this account when the address changes.</p>
+      <label className="block text-sm">New email<input required type="email" autoComplete="email" className="field mt-2" value={email} onChange={e => setEmail(e.target.value)} /></label>
+      <label className="block text-sm">Current password<input required type="password" autoComplete="current-password" className="field mt-2" value={emailPassword} onChange={e => setEmailPassword(e.target.value)} /></label>
+      {emailStatus && <p role={emailStatus.kind === 'error' ? 'alert' : 'status'} className={`text-sm ${emailStatus.kind === 'error' ? 'text-destructive' : ''}`}>{emailStatus.text}</p>}
+      <Button type="submit" disabled={emailBusy || !email.trim() || emailPassword.length < 6}>{emailBusy ? 'Saving…' : 'Change email'}</Button>
+    </form>
+    <form onSubmit={savePassword} className="space-y-3 border-t border-border pt-7">
+      <h2 className="section-title">Password</h2>
+      <label className="block text-sm">Current password<input required type="password" autoComplete="current-password" className="field mt-2" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} /></label>
+      <label className="block text-sm">New password<input required type="password" minLength={6} autoComplete="new-password" className="field mt-2" value={nextPassword} onChange={e => setNextPassword(e.target.value)} /></label>
+      <label className="block text-sm">Repeat new password<input required type="password" minLength={6} autoComplete="new-password" className="field mt-2" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} /></label>
+      {passwordStatus && <p role={passwordStatus.kind === 'error' ? 'alert' : 'status'} className={`text-sm ${passwordStatus.kind === 'error' ? 'text-destructive' : ''}`}>{passwordStatus.text}</p>}
+      <Button type="submit" disabled={passwordBusy || currentPassword.length < 1 || nextPassword.length < 6 || confirmPassword.length < 6}>{passwordBusy ? 'Saving…' : 'Change password'}</Button>
+    </form>
+    <Button type="button" variant="secondary" onClick={() => void signOut()}><LogOut />Sign out</Button>
+  </div>;
 }
 
 function Toggle({ label, description, checked, onChange, disabled }: { label: string; description?: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {

@@ -93,8 +93,10 @@ export async function loadAccount(userId: string, email: string): Promise<{ acco
   const row = profile.data as ProfileRow | null;
   const overrideMap: Record<string, ClassOverride> = {};
   for (const item of ((overrides.data ?? []) as OverrideRow[]).map(overrideFromRow)) overrideMap[item.key] = item.value;
+  const loginEmail = email || row?.email || '';
+  if (!failed && loginEmail && row?.email && row.email !== loginEmail) void saveProfileEmail(userId, loginEmail);
   const account = claimLocal(userId, {
-    email: row?.email ?? email,
+    email: loginEmail,
     name: row?.display_name || email.split('@')[0] || '',
     createdAt: row?.created_at ?? new Date().toISOString(),
     prefs: row?.preferences ?? {},
@@ -133,6 +135,10 @@ export function saveDisplayName(userId: string, name: string) {
   return enqueue('profiles', () => saveProfileColumn(userId, { display_name: name }));
 }
 
+export function saveProfileEmail(userId: string, email: string) {
+  return enqueue('profiles', () => saveProfileColumn(userId, { email }));
+}
+
 export function saveCollection(userId: string, collection: Collection, value: unknown): Promise<string | null> {
   if (collection === 'user_preferences') return enqueue('profiles', () => saveProfileColumn(userId, { preferences: value }));
   if (collection === 'dashboard_layouts') return enqueue('profiles', () => saveProfileColumn(userId, { layout: value }));
@@ -159,8 +165,10 @@ export function saveCollection(userId: string, collection: Collection, value: un
 export function explainAuth(message: string) {
   const m = message.toLowerCase();
   if (m.includes('invalid login') || m.includes('invalid credentials')) return 'That email and password don’t match.';
-  if (m.includes('already registered') || m.includes('already been registered')) return 'An account with this email already exists. Sign in instead.';
+  if (m.includes('already registered') || m.includes('already been registered') || m.includes('already exists')) return 'An account with this email already exists.';
   if (m.includes('not confirmed')) return 'Confirm that email first, then sign in.';
+  if (m.includes('different from the old')) return 'Choose a different password from the one you use now.';
+  if (m.includes('rate limit') || m.includes('too many')) return 'Too many attempts. Wait a minute and try again.';
   if (m.includes('password')) return 'Use a password of at least 6 characters.';
   return message;
 }

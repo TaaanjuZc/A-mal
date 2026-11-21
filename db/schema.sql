@@ -116,6 +116,28 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Keep the profile email in step when the login email changes.
+create or replace function public.handle_user_email_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.email is distinct from old.email then
+    update public.profiles
+      set email = coalesce(new.email, ''), updated_at = now()
+      where id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_email_changed on auth.users;
+create trigger on_auth_user_email_changed
+  after update of email on auth.users
+  for each row execute function public.handle_user_email_change();
+
 -- ── Only the signed-in person can see their rows ────────────────────────────
 alter table public.profiles enable row level security;
 drop policy if exists profiles_owner on public.profiles;

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type SetStateAction } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { DEFAULT_BUDGET, daysInMonth, monthOf } from '@/lib/daywell/budget';
-import { explainAuth, loadAccount, saveCollection, saveDisplayName, type Account } from '@/lib/daywell/cloud';
+import { explainAuth, loadAccount, saveCollection, saveDisplayName, saveProfileEmail, type Account } from '@/lib/daywell/cloud';
 import { DEFAULT_LAYOUT, normalizeLayout } from '@/lib/daywell/layout';
 import { DEFAULT_PRAYER_SETTINGS } from '@/lib/daywell/prayer';
 import { save, type Collection } from '@/lib/daywell/storage';
@@ -53,6 +53,13 @@ function mergePrefs(saved: Partial<Preferences> & { dailyBudget?: number }): Pre
   const { dailyBudget, ...rest } = saved;
   const budget = rest.budget ?? (dailyBudget ? { ...DEFAULT_BUDGET, monthly: dailyBudget * daysInMonth(monthOf(toISODate(new Date()))) } : DEFAULT_BUDGET);
   return { ...DEFAULT_PREFS, ...rest, budget, prayer: { ...DEFAULT_PREFS.prayer, ...rest.prayer }, reminders: { ...DEFAULT_PREFS.reminders, ...rest.reminders } };
+}
+
+async function withCurrentPassword(email: string, password: string) {
+  const supabase = getSupabase();
+  if (!supabase) return { supabase: null, error: 'Supabase is not connected yet.' };
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  return error ? { supabase: null, error: explainAuth(error.message) } : { supabase, error: null };
 }
 
 function usePlannerState() {
@@ -132,6 +139,14 @@ function usePlannerState() {
     void supabase.auth.getSession().then(({ data }) => enter(data.session));
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'TOKEN_REFRESHED') return;
+      if (event === 'USER_UPDATED' && session && signedIn.current === session.user.id) {
+        const email = session.user.email ?? '';
+        if (email) {
+          setProfile(p => (p && p.id === session.user.id && p.email !== email ? { ...p, email } : p));
+          void saveProfileEmail(session.user.id, email);
+        }
+        return;
+      }
       setTimeout(() => enter(session), 0);
     });
     return () => data.subscription.unsubscribe();
@@ -178,6 +193,32 @@ function usePlannerState() {
     setPersist(false);
     await getSupabase()?.auth.signOut();
   }, []);
+
+  const updateEmail = useCallback(async (nextEmail: string, currentPassword: string) => {
+    const current = profile?.email ?? '';
+    const email = nextEmail.trim().toLowerCase();
+    if (!profile || !current) return { error: 'Sign in again, then change the email.' };
+    if (email === current.toLowerCase()) return { error: 'That is already the email on this account.' };
+    const { supabase, error } = await withCurrentPassword(current, currentPassword);
+    if (!supabase || error) return { error: error ?? 'Supabase is not connected yet.' };
+    const { data, error: updateError } = await supabase.auth.updateUser({ email });
+    if (updateError) return { error: explainAuth(updateError.message) };
+    const confirmed = (data.user?.email ?? '').toLowerCase() === email;
+    if (!confirmed) return { notice: `Confirm ${email} from the message Supabase sends. Sign in with that address afterwards.` };
+    setProfile(p => (p ? { ...p, email: data.user?.email ?? email } : p));
+    const saved = await saveProfileEmail(profile.id, data.user?.email ?? email);
+    return saved ? { error: saved } : { notice: 'Email updated. Sign in with it next time.' };
+  }, [profile]);
+
+  const updatePassword = useCallback(async (currentPassword: string, nextPassword: string) => {
+    const current = profile?.email ?? '';
+    if (!current) return { error: 'Sign in again, then change the password.' };
+    if (nextPassword.length < 6) return { error: 'Use a password of at least 6 characters.' };
+    const { supabase, error } = await withCurrentPassword(current, currentPassword);
+    if (!supabase || error) return { error: error ?? 'Supabase is not connected yet.' };
+    const { error: updateError } = await supabase.auth.updateUser({ password: nextPassword });
+    return updateError ? { error: explainAuth(updateError.message) } : { notice: 'Password updated.' };
+  }, [profile]);
 
   const updatePrefs = useCallback((patch: SetStateAction<Preferences>) => setPrefs(patch), []);
   const setDark = useCallback((dark: boolean) => setPrefs(p => ({ ...p, dark })), []);
@@ -230,7 +271,7 @@ function usePlannerState() {
   const endClass = useCallback((key: string) => setClassOverrides(o => ({ ...o, [key]: { ...o[key], endedAt: Date.now() } })), []);
 
   return {
-    ready, configured: supabaseConfigured(), profile, userId, setName, storageError, signIn, signUp, signOut,
+    ready, configured: supabaseConfigured(), profile, userId, setName, storageError, signIn, signUp, signOut, updateEmail, updatePassword,
     prefs, updatePrefs, dark: prefs.dark, setDark,
     tasks, setTasks, addTask, updateTask, deleteTask, setOccurrenceStatus,
     notes, addNote, saveNote, deleteNote, deleteNotes,
