@@ -5,20 +5,22 @@ export type Extraction = { rows: ExtractedClass[]; rawText: string; method: stri
 export type Grid = string[][];
 
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
-export const ACCEPTED_EXTENSIONS = ['docx', 'doc', 'xlsx', 'xls', 'png', 'jpg', 'jpeg'] as const;
-export const ACCEPT_ATTR = '.docx,.doc,.xlsx,.xls,.png,.jpg,.jpeg';
+export const ACCEPTED_EXTENSIONS = ['pdf', 'docx', 'doc', 'xlsx', 'xls', 'csv', 'txt', 'png', 'jpg', 'jpeg', 'webp'] as const;
+export const ACCEPT_ATTR = '.pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.png,.jpg,.jpeg,.webp';
 
-export function fileKind(file: File): 'docx' | 'doc' | 'sheet' | 'image' | null {
+export function fileKind(file: File): 'pdf' | 'docx' | 'doc' | 'sheet' | 'text' | 'image' | null {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'pdf') return 'pdf';
   if (ext === 'docx') return 'docx';
   if (ext === 'doc') return 'doc';
-  if (ext === 'xlsx' || ext === 'xls') return 'sheet';
-  if (['png', 'jpg', 'jpeg'].includes(ext) && (!file.type || file.type.startsWith('image/'))) return 'image';
+  if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') return 'sheet';
+  if (ext === 'txt') return 'text';
+  if (['png', 'jpg', 'jpeg', 'webp'].includes(ext) && (!file.type || file.type.startsWith('image/'))) return 'image';
   return null;
 }
 
 export function validateFile(file: File): string | null {
-  if (!fileKind(file)) return 'Please upload a DOC, DOCX, XLS, XLSX, or PNG file.';
+  if (!fileKind(file)) return 'Please upload a PDF, Word, Excel, CSV, text, or image file.';
   if (file.size > MAX_FILE_BYTES) return 'Please use a file under 10 MB.';
   if (file.size === 0) return 'This file looks empty.';
   return null;
@@ -153,7 +155,8 @@ export function readSchedules(text: string, fallbackDays: number[] = []): { sche
 
 const CODE = /\b([A-Z]{2,5})\s?-?\s?(\d{3,4}[A-Z]?)(?:\s?[./-]\s?(\d{1,2}))?(?![\d:])/;
 const ROOM = /\b(?:room|rm|class\s?room|venue)\.?\s*(?:no\.?)?\s*[:#-]?\s*([A-Z]{0,5}\s?-?\d{1,4}[A-Z]?)\b/i;
-const ROOM_LIKE = /\b([A-Z]{2,5}\s?-?\s?\d{2,4}[A-Z]?)\b/;
+// "NAC511", "SAC 302", "AB1-101", "435 (General Purpose Programming Lab)"
+const ROOM_LIKE = /\b([A-Z]{1,4}\d{1,2}\s*-\s*\d{2,4}[A-Z]?|[A-Z]{2,5}\s?-?\s?\d{2,4}[A-Z]?|\d{2,4}\s*\([^)]{2,60}\))/;
 const SECTION = /\b(?:sec(?:tion)?|grp|group)\.?\s*[:#-]?\s*([A-Z0-9]{1,3})\b/i;
 const FACULTY = /\b(?:faculty|instructor|teacher|lecturer|course\s?teacher|taught\s?by)\s*[:-]\s*([A-Z][A-Za-z.' -]{1,48})/i;
 const TITLED = /\b((?:Dr|Prof|Professor|Mr|Mrs|Ms|Md|Engr)\.?\s+[A-Z][A-Za-z.' -]{1,40})/;
@@ -206,6 +209,7 @@ export function parseCellText(text: string): Partial<ExtractedClass> {
       if (faculty) rest = rest.replace(new RegExp(`(^|[\\s|,;])${faculty}(?=$|[\\s|,;])`), ' ');
     }
   }
+  rest = rest.replace(/\b\d+\.\d{2}\b/g, ' ').replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, ' ');
   const leftover = clean(rest.replace(/[|,;:/\\[\](){}=_~*"'`]+/g, ' ').replace(/\s[-–—]\s/g, ' '), 80).replace(/^[-–—.\s]+|[-–—.\s]+$/g, '');
   const courseName = /[A-Za-z]{2}/.test(leftover) ? leftover : '';
   return { courseCode: clean(courseCode, 20), courseName, room: clean(room, 30), faculty: clean(faculty, 60), section: clean(section, 10) };
@@ -215,7 +219,7 @@ export function parseCellText(text: string): Partial<ExtractedClass> {
 
 // Order matters: the first matching key claims a column ("Subject Code" is a code, not a name).
 const HEADERS: Record<keyof ExtractedClass | 'time', RegExp> = {
-  courseCode: /(course|subject)?\s*code|course\s*(no|id)/i,
+  courseCode: /(course|subject)?\s*code|course\s*(no|id)|^courses?(?:\(s\))?$/i,
   courseName: /course\s*(title|name)|subject|^course$|^title$/i,
   day: /^day|days|weekday/i,
   start: /start|from|begin/i,
@@ -238,6 +242,14 @@ function headerMap(row: string[]) {
   return map;
 }
 
+/** A course cell is often "ICE322", "ICE322 Lab", or "CSE173.5" rather than a separate title. */
+function splitCourse(codeCell: string, nameCell: string) {
+  const parsed = parseCellText(codeCell || nameCell);
+  const courseCode = parsed.courseCode || '';
+  const courseName = clean(codeCell && nameCell ? nameCell : parsed.courseName || '', 80);
+  return { courseCode, courseName, section: parsed.section || '' };
+}
+
 function fromHeaderTable(grid: Grid): ExtractedClass[] {
   for (let h = 0; h < Math.min(grid.length, 12); h++) {
     const map = headerMap(grid[h] ?? []);
@@ -248,7 +260,9 @@ function fromHeaderTable(grid: Grid): ExtractedClass[] {
     if (Object.keys(map).length < 3 || !hasTime) continue;
     const out: ExtractedClass[] = [];
     let lastDays: number[] = [];
+    let lastCourse: { courseCode: string; courseName: string; section: string } | null = null;
     for (const row of grid.slice(h + 1)) {
+      if (/\b(dropped|withdrawn|cancelled|canceled)\b/i.test(row.join(' '))) continue;
       const cell = (k: keyof typeof HEADERS) => { const i = map[k]; return i !== undefined ? clean(row[i], 300) : ''; };
       const dayCell = map.day !== undefined && map.day !== map.time ? cell('day') : '';
       const columnDays = dayCell ? parseDays(dayCell, true) : lastDays;
@@ -260,16 +274,26 @@ function fromHeaderTable(grid: Grid): ExtractedClass[] {
         schedules = start ? [{ days: columnDays, start, end: parseSingleTime(cell('end')) || start }] : [];
       }
       if (!schedules.some(s => s.days.length)) continue;
-      const course = parseCellText([cell('courseCode'), cell('courseName')].join(' | '));
+      const course = splitCourse(cell('courseCode'), cell('courseName'));
       const fromRow = parseCellText(row.map(c => clean(c)).join(' | '));
-      // A "Course" column often holds just the code ("CSE173" or "CSE173.5"), so split it unless there's a separate code column.
-      const fields = {
-        courseCode: cell('courseCode') ? clean(cell('courseCode').replace(/\s?[./-]\s?\d{1,2}$/, ''), 20) : course.courseCode ?? '',
-        courseName: cell('courseCode') ? clean(cell('courseName'), 80) : course.courseName ?? '',
-        section: cell('section') || course.section || (map.section === undefined ? fromRow.section : '') || '',
-        room: known(map.room !== undefined ? cell('room') : fromRow.room ?? ''),
+      let courseCode = course.courseCode;
+      let courseName = course.courseName;
+      let section = cell('section') || course.section || (map.section === undefined ? fromRow.section : '') || '';
+      // A lab line often repeats only the time and room; it belongs to the course above it.
+      if (!courseCode && !courseName && lastCourse) {
+        courseCode = lastCourse.courseCode;
+        courseName = lastCourse.courseName;
+        if (!section) section = lastCourse.section;
+      }
+      if (!section && lastCourse && courseCode === lastCourse.courseCode) section = lastCourse.section;
+      const fields: Pick<ExtractedClass, 'courseCode' | 'courseName' | 'section' | 'room' | 'faculty'> = {
+        courseCode,
+        courseName,
+        section,
+        room: known(map.room !== undefined ? cell('room') : '') || fromRow.room || '',
         faculty: known(map.faculty !== undefined ? cell('faculty') : fromRow.faculty ?? ''),
       };
+      if (fields.courseCode || fields.courseName) lastCourse = { courseCode: fields.courseCode, courseName: fields.courseName, section: fields.section };
       for (const s of schedules) for (const day of s.days) out.push({ day, start: s.start, end: s.end, ...fields });
     }
     if (out.length) return out;
@@ -316,7 +340,7 @@ export function fromLines(lines: string[]): ExtractedClass[] {
   let contextDays: number[] = [];
   for (const raw of lines) {
     const line = clean(raw, 300);
-    if (!line) continue;
+    if (!line || /\b(dropped|withdrawn|cancelled|canceled)\b/i.test(line)) continue;
     const { schedules } = readSchedules(line, contextDays);
     if (!schedules.length) {
       const days = parseDays(line, true);
@@ -453,13 +477,131 @@ async function readImage(file: File, onProgress?: (p: number) => void) {
   }
 }
 
+export type PositionedText = { text: string; x: number; y: number };
+
+/** Rebuild a table from PDF text items, which arrive as loose words with coordinates. */
+export function gridsFromPositioned(items: PositionedText[]): Grid[] {
+  const sorted = items.filter(i => i.text.trim()).sort((a, b) => b.y - a.y || a.x - b.x);
+  const lines: { y: number; cells: PositionedText[] }[] = [];
+  for (const item of sorted) {
+    const line = lines.find(l => Math.abs(l.y - item.y) <= 3);
+    if (line) line.cells.push(item);
+    else lines.push({ y: item.y, cells: [item] });
+  }
+  for (const line of lines) line.cells.sort((a, b) => a.x - b.x);
+
+  const grids: Grid[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const headerLine = lines[i];
+    if (!headerLine) continue;
+    const joined = headerLine.cells.map(c => c.text).join(' ');
+    const headers = headerLine.cells.filter(c => c.text.trim().length <= 40);
+    if (headers.length < 3 || !/time/i.test(joined) || !/room|course|class/i.test(joined)) continue;
+    const cols = headers.map(h => h.x);
+    const assign = (cells: PositionedText[]) => {
+      const row = cols.map(() => '');
+      for (const cell of cells) {
+        let idx = 0;
+        let best = Infinity;
+        cols.forEach((x, k) => {
+          const d = Math.abs(cell.x - x);
+          if (d < best) { best = d; idx = k; }
+        });
+        row[idx] = `${row[idx]} ${cell.text}`.trim();
+      }
+      return row;
+    };
+    const table: Grid = [headers.map(h => h.text.trim())];
+    let lastY = headerLine.y;
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (!line) break;
+      const gap = lastY - line.y;
+      const text = line.cells.map(c => c.text).join(' ');
+      const isClass = !!parseTimeRange(text) || /\b[A-Z]{2,5}\s?-?\s?\d{3,4}/.test(text);
+      if (isClass && gap < 80) {
+        table.push(assign(line.cells));
+        lastY = line.y;
+        continue;
+      }
+      if (gap <= 14 && table.length > 1) {
+        const prev = table[table.length - 1];
+        if (prev) assign(line.cells).forEach((cell, k) => { if (cell) prev[k] = `${prev[k] ?? ''} ${cell}`.trim(); });
+        lastY = line.y;
+        continue;
+      }
+      break;
+    }
+    if (table.length > 1) grids.push(table);
+  }
+  return grids;
+}
+
+function clusterPositionedLines(items: PositionedText[]) {
+  const sorted = items.filter(i => i.text.trim()).sort((a, b) => b.y - a.y || a.x - b.x);
+  const lines: { y: number; parts: string[] }[] = [];
+  for (const item of sorted) {
+    const line = lines.find(l => Math.abs(l.y - item.y) <= 3);
+    if (line) line.parts.push(item.text);
+    else lines.push({ y: item.y, parts: [item.text] });
+  }
+  return lines.map(l => l.parts.join(' '));
+}
+
+async function readPdf(buf: ArrayBuffer, onProgress?: (p: number) => void) {
+  // The legacy build reads text in current browsers and in tests. The modern build throws while loading under Node.
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs') as typeof import('pdfjs-dist');
+  if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+    const worker = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
+    pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  }
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+  const items: PositionedText[] = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const content = await page.getTextContent();
+    for (const raw of content.items) {
+      const it = raw as { str?: string; transform?: number[] };
+      const text = it.str?.trim();
+      if (!text || !it.transform) continue;
+      items.push({ text, x: it.transform[4] ?? 0, y: (it.transform[5] ?? 0) + (doc.numPages - p) * 10_000 });
+    }
+    onProgress?.(p / doc.numPages);
+  }
+  const grids = gridsFromPositioned(items);
+  const lines = clusterPositionedLines(items);
+  if (parseGrids(grids, lines).length || typeof document === 'undefined') return { grids, lines };
+  // A scanned PDF has no text layer. Render each page and read it like an image.
+  const { createWorker } = await import('tesseract.js');
+  const worker = await createWorker('eng');
+  const ocr: string[] = [];
+  try {
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvas, viewport }).promise;
+      const { data } = await worker.recognize(canvas);
+      ocr.push(...data.text.split('\n').map(fixOcr));
+      onProgress?.(p / doc.numPages);
+    }
+  } finally {
+    await worker.terminate();
+  }
+  return { grids: [] as Grid[], lines: ocr };
+}
+
 export async function extractFromFile(file: File, onProgress?: (p: number) => void): Promise<Extraction> {
   const kind = fileKind(file);
   let read: { grids: Grid[]; lines: string[] };
   let method: string;
-  if (kind === 'docx') { read = await readDocx(await file.arrayBuffer()); method = 'Word document tables'; }
+  if (kind === 'pdf') { read = await readPdf(await file.arrayBuffer(), onProgress); method = 'PDF text'; }
+  else if (kind === 'docx') { read = await readDocx(await file.arrayBuffer()); method = 'Word document tables'; }
   else if (kind === 'sheet') { read = await readSheet(await file.arrayBuffer()); method = 'Spreadsheet cells'; }
   else if (kind === 'doc') { read = readLegacyDoc(await file.arrayBuffer()); method = 'Legacy Word text (best effort)'; }
+  else if (kind === 'text') { read = { grids: [], lines: new TextDecoder().decode(await file.arrayBuffer()).split(/\r?\n/) }; method = 'Plain text'; }
   else if (kind === 'image') { read = await readImage(file, onProgress); method = 'Text recognition (OCR)'; }
   else throw new Error('Unsupported file type.');
   const rawText = [...read.grids.map(g => g.map(r => r.filter(Boolean).join(' | ')).join('\n')), read.lines.join('\n')].join('\n').slice(0, 30_000);

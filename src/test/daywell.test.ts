@@ -3,7 +3,7 @@ import { budgetSummary, categoryBreakdown, limitWarnings } from "@/lib/daywell/b
 import { classState, occurrenceKey } from "@/lib/daywell/classes";
 import { DEFAULT_PRAYER_SETTINGS, PRAYERS, prayerTimesFor } from "@/lib/daywell/prayer";
 import { buildReminders } from "@/lib/daywell/reminders";
-import { extractFromFile, fixOcr, fromLines, parseCellText, parseDays, parseGrids, parseTimeRange } from "@/lib/daywell/routine-parser";
+import { extractFromFile, fixOcr, fromLines, gridsFromPositioned, parseCellText, parseDays, parseGrids, parseTimeRange } from "@/lib/daywell/routine-parser";
 import { occurrencesOn, occursOn, taskStatus } from "@/lib/daywell/tasks";
 import { atTime, greetingFor } from "@/lib/daywell/time";
 import { deleteDay, doneOn, notesWorkbookRows, setTick, streak, syncToday } from "@/lib/daywell/notes";
@@ -148,6 +148,45 @@ describe("routine parsing", () => {
     const rows = parseGrids([[["CSE173", "5", "MSA", "ST 08:00 AM - 09:30 AM", "NAC511"], ["PHY108L", "2", "KMH", "A 02:40 PM - 05:50 PM", "PHY LAB"]]], []);
     expect(rows.map(r => [r.courseCode, r.day])).toEqual([["CSE173", 0], ["CSE173", 2], ["PHY108L", 6]]);
     expect(rows.find(r => r.courseCode === "PHY108L")).toMatchObject({ start: "14:40", end: "17:50", faculty: "KMH", section: "2" });
+  });
+  it("reads an advising slip: code, classroom, and every meeting, and skips dropped courses", () => {
+    expect(parseTimeRange("3:10PM-4:40PM")).toEqual({ start: "15:10", end: "16:40" });
+    const rows = parseGrids([[
+      ["Course(s)", "Sec", "Cr", "Tuition", "Time-WeekDay", "Room", "Remarks"],
+      ["ECO7101", "16", "3.00", "0.00", "TR 3:10PM-4:40PM", "AB3-702", "Dropped on Sep 21 2026"],
+      ["ICE322", "1", "4.00", "22000.00", "MW 3:10PM-4:40PM", "AB1-101", ""],
+      ["ICE322 Lab", "", "", "", "R 4:50PM-6:50PM", "435 (General Purpose Programming Lab)", ""],
+      ["ICE439", "1", "3.00", "16500.00", "MW 4:50PM-6:20PM", "AB2-602", ""],
+      ["ICE476", "5", "3.00", "16500.00", "SR 3:10PM-4:40PM", "AB2-602", ""],
+      ["ICE476 Lab", "", "", "", "T 4:50PM-6:50PM", "638 (Artificial Intelligence Lab)", ""],
+      ["ICE496A", "1", "1.00", "4400.00", "A 10:10AM-11:40AM", "Project", ""],
+    ]], []);
+    expect(rows.map(r => r.courseCode)).not.toContain("ECO7101");
+    const by = (code: string, name = "") => rows.filter(r => r.courseCode === code && r.courseName === name);
+    expect(by("ICE322").map(r => r.day)).toEqual([1, 3]);
+    expect(by("ICE322")[0]).toMatchObject({ start: "15:10", end: "16:40", room: "AB1-101", section: "1", courseName: "" });
+    expect(by("ICE322", "Lab")).toEqual([expect.objectContaining({ day: 4, start: "16:50", end: "18:50", room: "435 (General Purpose Programming Lab)", section: "1" })]);
+    expect(by("ICE439").map(r => [r.day, r.room])).toEqual([[1, "AB2-602"], [3, "AB2-602"]]);
+    expect(by("ICE476").map(r => r.day)).toEqual([0, 4]);
+    expect(by("ICE476", "Lab")[0]).toMatchObject({ day: 2, start: "16:50", room: "638 (Artificial Intelligence Lab)", section: "5" });
+    expect(by("ICE496A")[0]).toMatchObject({ day: 6, start: "10:10", end: "11:40", room: "Project", section: "1" });
+  });
+  it("rebuilds that slip from PDF word positions", () => {
+    const at = (text: string, x: number, y: number) => ({ text, x, y });
+    const grid = gridsFromPositioned([
+      at("Course(s)", 45, 705), at("Sec", 140, 705), at("Cr", 199, 705), at("Tuition", 286, 705), at("Time-WeekDay", 328, 705), at("Room", 434, 705), at("Remarks", 517, 705),
+      at("ECO7101", 51, 692), at("16", 144, 692), at("3.00", 197, 692), at("0.00", 304, 692), at("TR 3:10PM-4:40PM", 328, 692), at("AB3-702", 432, 692), at("Dropped on Sep 21 2026", 492, 692),
+      at("9:08PM with 100.00%", 499, 683), at("refund", 527, 674),
+      at("ICE322", 55, 661), at("1", 146, 661), at("4.00", 197, 661), at("22000.00", 286, 661), at("MW 3:10PM-4:40PM", 326, 661), at("AB1-101", 432, 661),
+      at("ICE322 Lab", 48, 645), at("R 4:50PM-6:50PM", 330, 645), at("435 (General Purpose", 408, 645), at("Programming Lab)", 415, 636),
+      at("ICE496A", 53, 569), at("1", 146, 569), at("1.00", 197, 569), at("4400.00", 290, 569), at("A 10:10AM-11:40AM", 326, 569), at("Project", 436, 569),
+      at("Tuition Fee", 11, 550), at("59400.00", 278, 550),
+    ]);
+    const rows = parseGrids(grid, []);
+    expect(rows.find(r => r.courseCode === "ECO7101")).toBeUndefined();
+    expect(rows.find(r => r.courseCode === "ICE322" && r.courseName === "")).toMatchObject({ day: 1, room: "AB1-101", start: "15:10" });
+    expect(rows.find(r => r.courseName === "Lab")).toMatchObject({ courseCode: "ICE322", day: 4, room: "435 (General Purpose Programming Lab)", section: "1" });
+    expect(rows.find(r => r.courseCode === "ICE496A")).toMatchObject({ day: 6, room: "Project", start: "10:10", end: "11:40" });
   });
   it("parses OCR-style lines with day context", () => {
     const rows = fromLines(["Wednesday", "CSE 173 Discrete Math 2:40 - 4:10 Room 404", "Lunch"]);

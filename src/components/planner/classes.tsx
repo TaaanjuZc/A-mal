@@ -62,18 +62,104 @@ export function TodaysClasses() {
 }
 
 export function ClassesPage() {
-  const { sessions } = usePlanner();
-  const [adding, setAdding] = useState(false);
   return <>
-    <PageHeading title="A week with intention." subtitle="Upload your class routine — A’mal reads it, you confirm it, and the countdown takes care of the rest." action={<Button onClick={() => setAdding(true)}><Plus />Add class</Button>} />
+    <PageHeading title="A week with intention." subtitle="Upload a routine, or add every class for a day yourself. A day can have as many classes as you need." />
     <div className="grid grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-6 max-w-6xl mb-6">
       <ClassTimerCard />
       <RoutineUpload />
     </div>
+    <ManualClasses />
     <WeeklyRoutine />
-    {sessions.length === 0 && <p className="text-sm text-muted-foreground mt-4">Tip: you can also add classes one by one with “Add class”.</p>}
-    {adding && <ClassDialog onClose={() => setAdding(false)} />}
   </>;
+}
+
+type ClassDraft = ExtractedClass & { key: string };
+
+function blankDraft(day: number): ClassDraft {
+  return { ...EMPTY_ROW, day, key: uid() };
+}
+
+function ManualClasses() {
+  const { sessions, setSessions, userId } = usePlanner();
+  const [day, setDay] = useState(() => new Date().getDay());
+  const [rows, setRows] = useState<ClassDraft[]>(() => [blankDraft(new Date().getDay())]);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+  const onDay = sessions.filter(s => s.day === day).length;
+  const patch = (key: string, p: Partial<ExtractedClass>) => {
+    setSaved('');
+    setRows(rs => rs.map(r => (r.key === key ? { ...r, ...p } : r)));
+  };
+
+  function pickDay(next: number) {
+    setDay(next);
+    setRows(rs => rs.map(r => ({ ...r, day: next })));
+    setError('');
+    setSaved('');
+  }
+
+  function save(e: FormEvent) {
+    e.preventDefault();
+    const touched = rows.filter(r => r.courseName.trim() || r.courseCode.trim() || r.room.trim() || r.faculty.trim() || r.section.trim());
+    if (!touched.length) { setError(`Add a course name or code for at least one ${DAY_NAMES[day]} class.`); setSaved(''); return; }
+    for (const r of rows) {
+      const used = r.courseName.trim() || r.courseCode.trim() || r.room.trim() || r.faculty.trim() || r.section.trim();
+      if (!used) continue;
+      const n = rows.indexOf(r) + 1;
+      if (!(r.courseName.trim() || r.courseCode.trim())) { setError(`Class ${n} needs a course name or code.`); setSaved(''); return; }
+      if (!r.start || !r.end || r.end <= r.start) { setError(`Class ${n} needs an end time after its start time.`); setSaved(''); return; }
+    }
+    const created: ClassSession[] = touched.map(r => ({
+      id: uid(), userId: userId ?? '', routineId: null, day,
+      courseName: clean(r.courseName, 80), courseCode: clean(r.courseCode, 20), room: clean(r.room, 30), faculty: clean(r.faculty, 60), section: clean(r.section, 10),
+      start: r.start, end: r.end,
+    }));
+    setSessions(p => [...p, ...created]);
+    setRows([blankDraft(day)]);
+    setError('');
+    setSaved(`Added ${created.length} ${created.length === 1 ? 'class' : 'classes'} to ${DAY_NAMES[day]}.`);
+  }
+
+  return <form onSubmit={save} className="panel p-6 max-w-6xl mb-6">
+    <h2 className="section-title">Add classes yourself</h2>
+    <p className="text-sm text-muted-foreground mt-1 mb-4">Choose the day, then fill in each class that day. Add another row for a second class, a third, or as many as you have.</p>
+    <div className="flex flex-wrap gap-2 mb-5" role="tablist" aria-label="Day">
+      {WEEK_ORDER.map(d => {
+        const count = sessions.filter(s => s.day === d).length;
+        return <button key={d} type="button" role="tab" aria-selected={d === day} className={`chip ${d === day ? 'active' : ''}`} onClick={() => pickDay(d)}>
+          {DAY_NAMES[d]}{count > 0 && <span className="opacity-70">{count}</span>}
+        </button>;
+      })}
+    </div>
+    <div className="space-y-4">
+      {rows.map((r, i) => <div key={r.key} className="rounded-lg border border-border p-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <p className="text-sm font-medium">{DAY_NAMES[day]} · Class {i + 1}</p>
+          <Button type="button" variant="ghost" size="sm" aria-label={`Remove class ${i + 1}`} onClick={() => setRows(rs => rs.length === 1 ? [blankDraft(day)] : rs.filter(x => x.key !== r.key))}><Trash2 size={14} />Remove</Button>
+        </div>
+        <div className="grid sm:grid-cols-[minmax(0,1fr)_8rem] gap-3">
+          <label className="block text-sm">Course name<input className="field mt-2" value={r.courseName} onChange={e => patch(r.key, { courseName: e.target.value })} /></label>
+          <label className="block text-sm">Code<input className="field mt-2" value={r.courseCode} onChange={e => patch(r.key, { courseCode: e.target.value })} /></label>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
+          <label className="block text-sm">Start<input type="time" className="field mt-2" value={r.start} onChange={e => patch(r.key, { start: e.target.value })} /></label>
+          <label className="block text-sm">End<input type="time" className="field mt-2" value={r.end} onChange={e => patch(r.key, { end: e.target.value })} /></label>
+          <label className="block text-sm col-span-2 sm:col-span-1">Classroom<input className="field mt-2" value={r.room} onChange={e => patch(r.key, { room: e.target.value })} /></label>
+        </div>
+        <div className="grid sm:grid-cols-[minmax(0,1fr)_6rem] gap-3 mt-3">
+          <label className="block text-sm">Faculty <span className="text-muted-foreground">(optional)</span><input className="field mt-2" value={r.faculty} onChange={e => patch(r.key, { faculty: e.target.value })} /></label>
+          <label className="block text-sm">Section <span className="text-muted-foreground">(optional)</span><input className="field mt-2" value={r.section} onChange={e => patch(r.key, { section: e.target.value })} /></label>
+        </div>
+      </div>)}
+    </div>
+    <div className="flex flex-wrap items-center gap-3 mt-4">
+      <Button type="button" variant="secondary" onClick={() => { setSaved(''); setRows(rs => [...rs, blankDraft(day)]); }}><Plus size={14} />Add another class</Button>
+      <Button type="submit"><Check />Add to {DAY_NAMES[day]}</Button>
+    </div>
+    {onDay > 0 && <p className="text-xs text-muted-foreground mt-3">{DAY_NAMES[day]} already has {onDay} {onDay === 1 ? 'class' : 'classes'} on your schedule. New ones are added alongside them.</p>}
+    {error && <p className="text-sm text-destructive mt-3" role="alert">{error}</p>}
+    {saved && <p className="text-sm mt-3" role="status">{saved}</p>}
+  </form>;
 }
 
 function RoutineUpload() {
@@ -134,7 +220,7 @@ function RoutineUpload() {
 
   return <div className="panel p-6">
     <div className="flex items-center gap-2 mb-1"><Upload size={18} className="text-primary" /><h2 className="section-title">Upload class routine</h2></div>
-    <p className="text-sm text-muted-foreground mb-4">DOCX, DOC, XLSX, XLS or PNG, up to 10 MB. Files are read on your device; you’ll review everything before it’s saved.</p>
+    <p className="text-sm text-muted-foreground mb-4">PDF, Word, Excel, CSV, text, or a photo, up to 10 MB. Every class’s name, code, classroom, and time is read on your device — you review it, then it’s added to your schedule.</p>
     <input ref={input} type="file" className="hidden" accept={ACCEPT_ATTR} onChange={e => { const f = e.target.files?.[0]; if (f) void process(f); e.target.value = ''; }} />
     <button type="button" disabled={!!busy} onClick={() => input.current?.click()} onDragOver={e => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)} onDrop={onDrop}
       className={`w-full border border-dashed rounded-lg p-7 flex flex-col items-center gap-2 text-sm text-muted-foreground transition-colors ${dragOver ? 'bg-secondary border-primary' : 'border-border hover:bg-secondary'}`}>
