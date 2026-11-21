@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Plus, Moon, Sun, Check, X, BellRing } from 'lucide-react';
+import { Plus, Moon, Sun, Check, X, BellRing, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DEFAULT_CATEGORIES } from '@/lib/daywell/tasks';
 import type { ReminderSettings } from '@/lib/daywell/types';
@@ -9,7 +9,7 @@ import { PageHeading } from './shell';
 import { notificationPermission, requestNotificationPermission, type PermissionState } from './notifications';
 
 export function SettingsView() {
-  const { dark, setDark, profile, setName, prefs, updatePrefs } = usePlanner();
+  const { dark, setDark, profile, setName, prefs, updatePrefs, signOut } = usePlanner();
   const [name, setNameDraft] = useState(profile?.name ?? '');
   const [savedName, setSavedName] = useState(false);
   const [newCat, setNewCat] = useState('');
@@ -45,7 +45,8 @@ export function SettingsView() {
         <form onSubmit={saveName}>
           <h2 className="section-title mb-3">Your name</h2>
           <div className="flex gap-2"><input aria-label="Display name" required maxLength={60} className="field" value={name} onChange={e => setNameDraft(e.target.value)} /><Button type="submit" disabled={!name.trim() || name.trim() === profile?.name}>{savedName ? <><Check />Saved</> : 'Save'}</Button></div>
-          <p className="text-xs text-muted-foreground mt-2">Used in your greeting and profile. Stored on this device until accounts are available.</p>
+          <p className="text-xs text-muted-foreground mt-2">Used in your greeting. Saved to the account for {profile?.email}.</p>
+          <Button type="button" variant="secondary" className="mt-4" onClick={() => void signOut()}><LogOut />Sign out</Button>
         </form>
         <div><h2 className="section-title mb-3">Appearance</h2><div className="flex gap-3"><Button variant={dark ? 'default' : 'outline'} onClick={() => setDark(true)}><Moon />Dark</Button><Button variant={!dark ? 'default' : 'outline'} onClick={() => setDark(false)}><Sun />Cream</Button></div></div>
         <label className="block text-sm">Lifestyle profile<select className="field mt-2" value={prefs.lifestyle} onChange={e => updatePrefs(p => ({ ...p, lifestyle: e.target.value }))}>{['Student', 'Employee', 'Business owner', 'Homemaker'].map(p => <option key={p}>{p}</option>)}</select></label>

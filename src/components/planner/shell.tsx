@@ -1,11 +1,12 @@
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Sun, Moon, LayoutGrid, ListTodo, NotebookPen, Wallet, GraduationCap, Settings, X, MapPin, ArrowRight } from 'lucide-react';
+import { Sun, Moon, LayoutGrid, ListTodo, NotebookPen, Wallet, GraduationCap, Settings, X, MapPin } from 'lucide-react';
 import { AmalMark, APP_NAME } from './brand';
 import { NamazIcon } from './namaz-icon';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Toaster } from '@/components/ui/sonner';
 import { initials } from '@/lib/daywell/time';
+import { AuthScreen, SetupScreen } from './auth';
 import { usePlanner } from './state';
 import { NotificationBell, ReminderEngine } from './notifications';
 
@@ -19,12 +20,13 @@ const nav = [
 ] as const;
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { dark, setDark, ready, profile, prefs, storageError } = usePlanner();
+  const { dark, setDark, ready, configured, profile, prefs, storageError } = usePlanner();
   const path = useRouterState({ select: s => s.location.pathname });
   const name = profile?.name ?? '';
 
   if (!ready) return <div className="dark"><div className="planner" aria-busy="true" /></div>;
-  if (!profile) return <div className={dark ? 'dark' : ''}><div className="planner"><Onboarding /></div></div>;
+  if (!configured) return <div className={dark ? 'dark' : ''}><div className="planner"><SetupScreen /></div></div>;
+  if (!profile) return <div className={dark ? 'dark' : ''}><div className="planner"><AuthScreen /></div></div>;
 
   return <div className={dark ? 'dark' : ''}><div className="planner">
     <ReminderEngine />
@@ -47,32 +49,12 @@ export function Shell({ children }: { children: ReactNode }) {
           <Link to="/settings" aria-label="Your profile" className="size-9 rounded-full bg-lilac text-ink grid place-items-center text-xs font-semibold ml-1">{initials(name)}</Link>
         </div>
       </header>
-      {storageError && <p role="alert" className="bg-coral text-ink text-sm px-6 py-2">Your browser storage is full, so recent changes couldn’t be saved. Free up space and keep this tab open — {APP_NAME} will retry on your next change.</p>}
+      {storageError && <p role="alert" className="bg-coral text-ink text-sm px-6 py-2">{storageError}</p>}
       <main className="content">{children}</main>
     </div>
     <nav className="mobile-nav">{nav.map(n => <Link key={n.to} to={n.to} className={`nav-link ${path === n.to ? 'active' : ''}`}><n.icon size={19} /><span>{n.short}</span></Link>)}</nav>
     <Toaster position="bottom-right" />
   </div></div>;
-}
-
-function Onboarding() {
-  const { setName } = usePlanner();
-  const [value, setValue] = useState('');
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    if (value.trim()) setName(value.trim().slice(0, 60));
-  }
-  return <main className="min-h-screen grid place-items-center px-5">
-    <form onSubmit={submit} className="onboarding w-full max-w-md">
-      <span className="brand-icon mb-8"><AmalMark size={30} /></span>
-      <h1 className="page-title">Welcome to {APP_NAME}<span className="text-primary">.</span></h1>
-      <p className="text-muted-foreground text-sm mt-3 mb-8">Your everyday space for tasks, Namaz, classes, and notes. What should we call you?</p>
-      <label className="block text-sm" htmlFor="display-name">Your name</label>
-      <input id="display-name" autoFocus required maxLength={60} autoComplete="given-name" className="field mt-2" value={value} onChange={e => setValue(e.target.value)} placeholder="e.g. Ayesha" />
-      <Button type="submit" className="w-full mt-5" disabled={!value.trim()}>Let’s begin <ArrowRight /></Button>
-      <p className="text-[11px] text-muted-foreground mt-4">Saved on this device. You can change it anytime in Settings.</p>
-    </form>
-  </main>;
 }
 
 export function PageHeading({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }) {

@@ -1,219 +1,145 @@
--- Daywell PostgreSQL schema (Supabase-compatible).
--- The app currently persists the same shapes in browser storage under a local profile id
--- (src/lib/daywell/storage.ts). On first sign-in, that id's records are uploaded and
--- re-owned by the authenticated user's id — no data model changes required.
-
-create extension if not exists "pgcrypto";
-create extension if not exists "citext";
-
--- ── Accounts (Phase 5: architecture only) ────────────────────────────────────
-create table users (
-  id               uuid primary key default gen_random_uuid(),
-  full_name        text not null check (char_length(full_name) between 1 and 120),
-  email            citext not null unique,
-  password_hash    text not null,                 -- Argon2id
-  email_verified_at timestamptz,                  -- required before full activation
-  created_at       timestamptz not null default now(),
-  updated_at       timestamptz not null default now()
-);
-
-create table auth_sessions (                     -- referenced by an HTTP-only, Secure, SameSite cookie
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references users(id) on delete cascade,
-  token_hash  text not null unique,
-  expires_at  timestamptz not null,
-  created_at  timestamptz not null default now(),
-  user_agent  text
-);
-
-create table auth_tokens (                       -- email verification and password reset
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references users(id) on delete cascade,
-  purpose     text not null check (purpose in ('verify_email', 'reset_password')),
-  token_hash  text not null unique,
-  expires_at  timestamptz not null,
-  used_at     timestamptz
-);
-
--- ── Preferences ──────────────────────────────────────────────────────────────
-create table user_preferences (
-  user_id        uuid primary key references users(id) on delete cascade,
-  display_name   text not null,
-  dark_mode      boolean not null default true,
-  lifestyle      text,
-  monthly_budget numeric(12, 2) not null default 0 check (monthly_budget >= 0),  -- 0 = not set
-  category_limits jsonb not null default '{}',  -- { "Food": 5000, ... } per month
-  prayer         jsonb not null,   -- location, lat/lng, time_zone, method, madhab, adjustments, reminders
-  reminders      jsonb not null,   -- enabled, per-kind toggles, lead times, browser delivery
+create table if not exists public.profiles (
+  id             uuid primary key references auth.users (id) on delete cascade,
+  email          text not null,
+  display_name   text not null default '',
+  preferences    jsonb not null default '{}'::jsonb,  -- theme, prayer, reminders, budget, categories
+  layout         jsonb not null default '[]'::jsonb,  -- dashboard blocks
+  reminder_inbox jsonb not null default '[]'::jsonb,
+  reminder_meta  jsonb not null default '{}'::jsonb,
+  created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
 
--- ── Tasks ────────────────────────────────────────────────────────────────────
-create table task_categories (
-  id        uuid primary key default gen_random_uuid(),
-  user_id   uuid not null references users(id) on delete cascade,
-  name      text not null check (char_length(name) between 1 and 30),
-  is_default boolean not null default false,
-  unique (user_id, name)
+create table if not exists public.tasks (
+  id                uuid primary key,
+  user_id           uuid not null references auth.users (id) on delete cascade,
+  title             text not null,
+  description       text not null default '',
+  category          text not null default '',
+  task_date         date not null,
+  start_time        text not null,
+  end_time          text not null,
+  reminder_minutes  integer,
+  recurrence        text not null default 'none',
+  recurrence_until  date,
+  status_overrides  jsonb not null default '{}'::jsonb,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+create index if not exists tasks_user_date on public.tasks (user_id, task_date);
+
+create table if not exists public.notes (
+  id           uuid primary key,
+  user_id      uuid not null references auth.users (id) on delete cascade,
+  title        text not null default '',
+  category     text not null default 'Personal',
+  color        text not null default 'plain',
+  kind         text not null default 'note',
+  journal_date date,
+  blocks       jsonb not null default '[]'::jsonb,
+  days         jsonb not null default '{}'::jsonb,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists notes_user_updated on public.notes (user_id, updated_at desc);
+
+create table if not exists public.expenses (
+  id       uuid primary key,
+  user_id  uuid not null references auth.users (id) on delete cascade,
+  title    text not null,
+  amount   numeric(12, 2) not null check (amount > 0),
+  category text not null,
+  spent_on date not null
+);
+create index if not exists expenses_user_date on public.expenses (user_id, spent_on);
+
+create table if not exists public.class_routines (
+  id          uuid primary key,
+  user_id     uuid not null references auth.users (id) on delete cascade,
+  name        text not null,
+  source_file text,
+  created_at  timestamptz not null default now()
 );
 
-create table tasks (
-  id               uuid primary key default gen_random_uuid(),
-  user_id          uuid not null references users(id) on delete cascade,
-  category_id      uuid references task_categories(id) on delete set null,
-  title            text not null check (char_length(title) between 1 and 120),
-  description      text not null default '',
-  date             date not null,
-  start_time       time not null,
-  end_time         time not null,
-  reminder_minutes integer check (reminder_minutes >= 0),
-  recurrence       text not null default 'none' check (recurrence in ('none', 'daily', 'weekdays', 'weekly', 'monthly')),
-  recurrence_until date,
-  status_overrides jsonb not null default '{}',   -- { "YYYY-MM-DD": "in_progress" | "completed" }
-  created_at       timestamptz not null default now(),
-  updated_at       timestamptz not null default now()
-);
-create index tasks_user_date on tasks (user_id, date);
-
--- ── Notes ────────────────────────────────────────────────────────────────────
-create table notes (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references users(id) on delete cascade,
-  title       text not null default '',
-  category    text not null default 'Personal',
-  color       text not null default 'plain',
-  content     jsonb not null default '[]',   -- ordered blocks: { id, type, text, checked?, marks? }
-  kind        text not null default 'note' check (kind in ('note', 'everyday', 'journal')),
-  journal_date date,                         -- set only for kind = 'journal'
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
-);
-create index notes_user_updated on notes (user_id, updated_at desc);
-create unique index notes_one_journal_per_day on notes (user_id, journal_date) where kind = 'journal';
-
--- One row per day an 'everyday' note's checklist was used; items snapshot { id, text, done }.
-create table note_daily_records (
-  note_id     uuid not null references notes(id) on delete cascade,
-  day         date not null,
-  items       jsonb not null default '[]',
-  primary key (note_id, day)
-);
-
--- ── Class routines ───────────────────────────────────────────────────────────
-create table uploaded_files (
-  id            uuid primary key default gen_random_uuid(),
-  user_id       uuid not null references users(id) on delete cascade,
-  file_name     text not null,
-  mime_type     text not null,
-  size_bytes    integer not null check (size_bytes between 1 and 10485760),
-  storage_key   text not null,               -- private object-storage path, served via signed URLs only
-  created_at    timestamptz not null default now()
-);
-
-create table class_routines (
-  id              uuid primary key default gen_random_uuid(),
-  user_id         uuid not null references users(id) on delete cascade,
-  name            text not null,
-  source_file_id  uuid references uploaded_files(id) on delete set null,
-  created_at      timestamptz not null default now()
-);
-
-create table class_sessions (
-  id           uuid primary key default gen_random_uuid(),
-  user_id      uuid not null references users(id) on delete cascade,
-  routine_id   uuid references class_routines(id) on delete cascade,
+create table if not exists public.class_sessions (
+  id           uuid primary key,
+  user_id      uuid not null references auth.users (id) on delete cascade,
+  routine_id   uuid,
   course_name  text not null default '',
   course_code  text not null default '',
-  day_of_week  smallint not null check (day_of_week between 0 and 6),   -- 0 = Sunday
-  start_time   time not null,
-  end_time     time not null check (end_time > start_time),
+  day_of_week  smallint not null check (day_of_week between 0 and 6), -- 0 = Sunday
+  start_time   text not null,
+  end_time     text not null,
   room         text not null default '',
   faculty      text not null default '',
   section      text not null default ''
 );
-create index class_sessions_user_day on class_sessions (user_id, day_of_week);
+create index if not exists class_sessions_user_day on public.class_sessions (user_id, day_of_week);
 
-create table class_session_overrides (     -- manual start / end, one row per class occurrence
-  session_id  uuid not null references class_sessions(id) on delete cascade,
-  user_id     uuid not null references users(id) on delete cascade,
-  date        date not null,
-  started_at  timestamptz,
-  ended_at    timestamptz,
-  primary key (session_id, date)          -- prevents duplicate active sessions for the same class
+create table if not exists public.class_overrides (
+  user_id        uuid not null references auth.users (id) on delete cascade,
+  occurrence_key text not null, -- sessionId@YYYY-MM-DD
+  started_at     bigint,
+  ended_at       bigint,
+  primary key (user_id, occurrence_key)
 );
 
--- ── Prayer times & reminders ─────────────────────────────────────────────────
-create table prayer_times (               -- cache of calculated times per user, location and day
-  user_id     uuid not null references users(id) on delete cascade,
-  date        date not null,
-  settings_hash text not null,            -- invalidates when location/method/madhab/adjustments change
-  times       jsonb not null,             -- { Fajr, Sunrise, Dhuhr, Asr, Maghrib, Isha } as timestamptz
-  primary key (user_id, date, settings_hash)
+-- ── Namaz log: one row per prayer marked on a day ───────────────────────────
+create table if not exists public.prayer_log (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  day     date not null,
+  prayer  text not null,
+  primary key (user_id, day, prayer)
 );
 
-create table prayer_log (
-  user_id  uuid not null references users(id) on delete cascade,
-  date     date not null,
-  prayer   text not null check (prayer in ('Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha')),
-  primary key (user_id, date, prayer)
-);
+-- ── Create the profile row when someone signs up ────────────────────────────
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, display_name)
+  values (
+    new.id,
+    coalesce(new.email, ''),
+    coalesce(nullif(new.raw_user_meta_data->>'display_name', ''), split_part(coalesce(new.email, ''), '@', 1))
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$;
 
-create table reminders (
-  id           text primary key,          -- kind:source:date:fire_at — rescheduling yields a new id
-  user_id      uuid not null references users(id) on delete cascade,
-  kind         text not null check (kind in ('task', 'class', 'prayer')),
-  source_id    text not null,
-  fire_at      timestamptz not null,
-  delivered_at timestamptz,               -- set once; guarantees no duplicate push
-  read_at      timestamptz,
-  dismissed_at timestamptz
-);
-create index reminders_due on reminders (fire_at) where delivered_at is null;
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
 
-create table push_subscriptions (         -- Web Push endpoints for the backend scheduler
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references users(id) on delete cascade,
-  endpoint    text not null unique,
-  p256dh      text not null,
-  auth        text not null,
-  created_at  timestamptz not null default now()
-);
+-- ── Only the signed-in person can see their rows ────────────────────────────
+alter table public.profiles enable row level security;
+drop policy if exists profiles_owner on public.profiles;
+create policy profiles_owner on public.profiles
+  for all to authenticated
+  using (id = auth.uid())
+  with check (id = auth.uid());
 
--- ── Dashboard ────────────────────────────────────────────────────────────────
-create table dashboard_layouts (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references users(id) on delete cascade,
-  name        text not null default 'Default',
-  blocks      jsonb not null,             -- [{ id, order, size, visible }]
-  updated_at  timestamptz not null default now(),
-  unique (user_id, name)
-);
-
--- ── Expenses (existing module) ───────────────────────────────────────────────
-create table expenses (
-  id        uuid primary key default gen_random_uuid(),
-  user_id   uuid not null references users(id) on delete cascade,
-  title     text not null,
-  amount    numeric(12, 2) not null check (amount > 0),
-  category  text not null,
-  date      date not null default current_date
-);
-
--- ── Row-level security: a user can only ever touch their own rows ────────────
--- With Supabase, auth.uid() is the signed-in user; a FastAPI backend sets
--- `app.user_id` per request instead (set_config('app.user_id', ..., true)).
 do $$
 declare t text;
 begin
   foreach t in array array[
-    'user_preferences', 'task_categories', 'tasks', 'notes', 'uploaded_files', 'class_routines',
-    'class_sessions', 'class_session_overrides', 'prayer_times', 'prayer_log', 'reminders',
-    'push_subscriptions', 'dashboard_layouts', 'expenses'
+    'tasks', 'notes', 'expenses', 'class_routines', 'class_sessions', 'class_overrides', 'prayer_log'
   ] loop
-    execute format('alter table %I enable row level security', t);
+    execute format('alter table public.%I enable row level security', t);
+    execute format('drop policy if exists %I on public.%I', t || '_owner', t);
     execute format(
-      'create policy %I on %I using (user_id = current_setting(''app.user_id'')::uuid) with check (user_id = current_setting(''app.user_id'')::uuid)',
+      'create policy %I on public.%I for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid())',
       t || '_owner', t
     );
+    execute format('revoke all on table public.%I from anon, public', t);
+    execute format('grant select, insert, update, delete on table public.%I to authenticated', t);
   end loop;
 end $$;
+
+revoke all on table public.profiles from anon, public;
+grant select, insert, update, delete on table public.profiles to authenticated;

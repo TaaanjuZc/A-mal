@@ -4,7 +4,7 @@
 export type ISODate = string; // YYYY-MM-DD in the user's local calendar
 export type HHmm = string; // 24h "HH:mm"
 
-export type Profile = { id: string; name: string; createdAt: string };
+export type Profile = { id: string; name: string; email: string; createdAt: string };
 
 export type Recurrence = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly';
 export type TaskStatus = 'upcoming' | 'in_progress' | 'completed' | 'overdue';

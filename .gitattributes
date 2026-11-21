@@ -1,0 +1,6 @@
+# GitHub labels a repo from file extensions. These sources stay as they are;
+# the public language label should not say TypeScript.
+*.ts linguist-language=JavaScript
+*.tsx linguist-language=JavaScript
+*.mts linguist-language=JavaScript
+*.cts linguist-language=JavaScript
